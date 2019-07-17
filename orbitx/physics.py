@@ -24,6 +24,10 @@ scipy.special.seterr(all='raise')
 log = logging.getLogger()
 
 
+TIME_ACC_TO_BOUND = {time_acc.value: time_acc.accurate_bound
+                     for time_acc in common.TIME_ACCS}
+
+
 class PEngine:
     """Physics Engine class. Encapsulates simulating physical state.
 
@@ -426,12 +430,32 @@ class PEngine:
         proto_state = y._proto_state
 
         while not self._stopping_simthread:
-            # self._solutions contains ODE solutions for the interval
-            # [self._solutions[0].t_min, self._solutions[-1].t_max]
-            # If we're in this function, requested_t is not in this interval!
-            # Then we should integrate the interval of
-            # [self._solutions[-1].t_max, requested_t]
-            # and hopefully a bit farther past the end of that interval.
+            # Check that our current time_acc is not too fast (and inaccurate).
+            acceleration_bound = TIME_ACC_TO_BOUND[round(y.time_acc)]
+            try:
+                craft = y.craft_entity()
+                reference = y.reference_entity()
+                target = y.target_entity()
+
+                # This is the Gm/r^2 equation, find the most significant source
+                # of gravity.
+                grav_accs = [
+                    0 if np.array_equal(craft.pos, entity.pos) else
+                    common.G * entity.mass /
+                    np.inner(craft.pos - entity.pos, craft.pos - entity.pos)
+                    for entity in [reference, target]
+                ]
+                if max(grav_accs) > acceleration_bound:
+                    for time_acc in reversed(common.TIME_ACCS):
+                        if time_acc.accurate_bound >= max(grav_accs):
+                            # TODO: test and see if this short circuits anything that SET TIME ACC command does
+                            y.time_acc = time_acc.value
+                            break
+
+            except y.NoEntityError:
+                # No craft exists.
+                pass
+
             hab_fuel_event = HabFuelEvent(y)
             altitude_event = AltitudeEvent(y, self.R)
             liftoff_event = LiftoffEvent(y)
@@ -468,6 +492,8 @@ class PEngine:
                 if self._stopping_simthread:
                     break
 
+                # self._solutions contains ODE solutions for the interval
+                # [self._solutions[0].t_min, self._solutions[-1].t_max].
                 self._solutions.append(ivp_out.sol)
                 self._solutions_cond.notify_all()
 
@@ -617,6 +643,10 @@ class LiftoffEvent(Event):
         # This should be positive when the craft isn't thrusting enough, and
         # zero when it is thrusting enough.
         return max(0, common.LAUNCH_TWR - thrust / weight)
+
+
+def _revise_time_acc(y: state.PhysicsState) -> state.PhysicsState:
+    pass
 
 
 def _reconcile_entity_dynamics(y: state.PhysicsState) -> state.PhysicsState:
