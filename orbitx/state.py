@@ -167,6 +167,16 @@ class PhysicsState:
     # N_COMPONENTS would be 4.
     N_COMPONENTS = 10
 
+    # The number of single-element values at the end of the y-vector.
+    # Currently just SRB_TIME and TIME_ACC are appended to the end. If there
+    # are more values appended to the end, increment this and follow the same
+    # code for .srb_time and .time_acc
+    N_SINGULAR_ELEMENTS = 2
+
+    # Constant indices for single-element values of the y-vector.
+    SRB_TIME_INDEX = -2
+    TIME_ACC_INDEX = -1
+
     # Datatype of internal y-vector
     DTYPE = np.longdouble
 
@@ -227,19 +237,23 @@ class PhysicsState:
             self._y0: np.ndarray = np.concatenate((
                 X, Y, VX, VY, Heading, Spin,
                 Fuel, Throttle, LandedOn, Broken,
-                np.array([self._proto_state.srb_time])),
+                np.array([self._proto_state.srb_time,
+                          self._proto_state.time_acc])),
                 axis=0).astype(self.DTYPE)
         else:
             # Take everything except the SRB time, the last element.
             self._y0: np.ndarray = y.astype(self.DTYPE)
-            self._proto_state.srb_time = y[-1]
+            self._proto_state.srb_time = y[self.SRB_TIME_INDEX]
+            self._proto_state.time_acc = y[self.TIME_ACC_INDEX]
 
         assert len(self._y0.shape) == 1, f'y is not 1D: {self._y0.shape()}'
-        assert (self._y0.size - 1) % self.N_COMPONENTS == 0, self._y0.size
-        assert (self._y0.size - 1) // self.N_COMPONENTS == \
-            len(proto_state.entities), \
+        assert (self._y0.size - self.N_SINGULAR_ELEMENTS) % \
+            self.N_COMPONENTS == 0, self._y0.size
+        assert (self._y0.size - self.N_SINGULAR_ELEMENTS) // \
+            self.N_COMPONENTS == len(proto_state.entities), \
             f'{self._y0.size} != {len(proto_state.entities)}'
-        self._n = (len(self._y0) - 1) // self.N_COMPONENTS
+        self._n = (len(self._y0) - self.N_SINGULAR_ELEMENTS) // \
+            self.N_COMPONENTS
 
         self._entities_with_atmospheres: List[int] = []
         for index, entity in enumerate(self._proto_state.entities):
@@ -255,7 +269,8 @@ class PhysicsState:
     def _y_components(self) -> np.ndarray:
         """Internal, returns N_COMPONENT number of arrays, each with an element
         for each entity."""
-        return self._y0[0:-1].reshape(self.N_COMPONENTS, -1)
+        return self._y0[0:-self.N_SINGULAR_ELEMENTS].reshape(
+            self.N_COMPONENTS, -1)
 
     def _index_to_name(self, index: int) -> str:
         """Translates an index into the entity list to the right name."""
@@ -370,7 +385,7 @@ class PhysicsState:
     @srb_time.setter
     def srb_time(self, val: float):
         self._proto_state.srb_time = val
-        self._y0[-1] = val
+        self._y0[self.SRB_TIME_INDEX] = val
 
     @property
     def parachute_deployed(self) -> bool:
@@ -442,6 +457,7 @@ class PhysicsState:
     @time_acc.setter
     def time_acc(self, new_acc: float):
         self._proto_state.time_acc = new_acc
+        self._y0[self.TIME_ACC_INDEX] = new_acc
 
     def craft_entity(self):
         """Convenience function, a full Entity representing the craft."""

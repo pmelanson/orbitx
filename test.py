@@ -61,16 +61,17 @@ class PhysicsEngineTestCase(unittest.TestCase):
         with PhysicsEngine('tests/only-sun.json') as physics_engine:
             # In this case, the only entity is the Sun. It starts at (0, 0)
             # with a speed of (1, -1). It should move.
+            t_delta = 100
             initial = physics_engine.get_state(0)
-            moved = physics_engine.get_state(10)
+            moved = physics_engine.get_state(100)
             self.assertEqual(initial.timestamp, 0)
             self.assertAlmostEqual(initial[0].x, 0)
             self.assertAlmostEqual(initial[0].y, 0)
             self.assertAlmostEqual(initial[0].vx, 1)
             self.assertAlmostEqual(initial[0].vy, -1)
-            self.assertEqual(moved.timestamp, 10)
-            self.assertAlmostEqual(moved[0].x, 10)
-            self.assertAlmostEqual(moved[0].y, -10)
+            self.assertEqual(moved.timestamp, t_delta)
+            self.assertAlmostEqual(moved[0].x, t_delta)
+            self.assertAlmostEqual(moved[0].y, -t_delta)
             self.assertAlmostEqual(moved[0].vx, 1)
             self.assertAlmostEqual(moved[0].vy, -1)
 
@@ -341,7 +342,8 @@ class PhysicsStateTestCase(unittest.TestCase):
             0, 0,     # throttle
             1, -1,    # only First is landed on Second
             0, 1,     # Second is broken
-            common.SRB_EMPTY
+            common.SRB_EMPTY,
+            1         # time_acc
         ])
 
         ps = state.PhysicsState(y0, self.physical_state)

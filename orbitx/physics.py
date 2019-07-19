@@ -1,6 +1,7 @@
 import collections
 import functools
 import logging
+import math
 import threading
 import time
 import warnings
@@ -100,8 +101,9 @@ class PEngine:
             self._simthread.join()
 
     def _start_simthread(self, t0: float, y0: state.PhysicsState) -> None:
-        if y0.time_acc == 0:
+        if round(y0.time_acc) == 0:
             # We've paused the simulation. Don't start a new simthread
+            log.debug('Pausing simulation')
             return
 
         # We don't need to synchronize self._last_simtime or
@@ -112,13 +114,13 @@ class PEngine:
         # Essentially just a cache of ODE solutions.
         self._solutions = collections.deque(maxlen=SOLUTION_CACHE_SIZE)
 
-        self._stopping_simthread = False
         self._simthread = threading.Thread(
             target=self._simthread_target,
             args=(t0, y0),
             name=f'simthread t={round(t0)} acc={y0.time_acc}',
             daemon=True
         )
+        self._stopping_simthread = False
 
         # Fork self._simthread into the background.
         self._simthread.start()
@@ -153,6 +155,7 @@ class PEngine:
             y0 = self.get_state(requested_t)
 
         if request.ident != Request.TIME_ACC_SET:
+            # Reveal the type of y0.craft as str (not None).
             assert y0.craft is not None
 
         if request.ident == Request.HAB_SPIN_CHANGE:
@@ -174,6 +177,8 @@ class PEngine:
         elif request.ident == Request.TIME_ACC_SET:
             assert request.time_acc_set >= 0
             y0.time_acc = request.time_acc_set
+            # TODO: We'll have to keep track of time_acc transitions for use by
+            # self._simtime().
         elif request.ident == Request.ENGINEERING_UPDATE:
             # Multiply this value by 100, because OrbitV considers engines at
             # 100% to be 100x the maximum thrust.
@@ -246,6 +251,11 @@ class PEngine:
                 entity.artificial
                 for entity in physical_state]) >= 1)[0]
 
+        # We keep track of the PhysicalState because our simulation
+        # only simulates things that change like position and velocity,
+        # not things that stay constant like names and mass.
+        # self._last_physical_state contains these constants.
+        self._last_physical_state = physical_state._proto_state
         self.R = np.array([entity.r for entity in physical_state])
         self.M = np.array([entity.mass for entity in physical_state])
 
@@ -305,11 +315,7 @@ class PEngine:
     def _simthread_target(self, t, y):
         while True:
             try:
-                # We keep track of the PhysicalState because our simulation
-                # only simulates things that change like position and velocity,
-                # not things that stay constant like names and mass.
-                # self._last_physical_state contains these constants.
-                self._last_physical_state = y._proto_state
+                print(f'starting sim with {y.time_acc}')
                 self._run_simulation(t, y)
                 if self._stopping_simthread:
                     return
@@ -324,16 +330,14 @@ class PEngine:
                     self._solutions_cond.notify_all()
                 return
 
-                TODO why is loading and pausing not working intermittently? maybe its threading.
-
     def _derive(self, t: float, y_1d: np.ndarray,
                 pass_through_state: PhysicalState) -> np.ndarray:
         """
         y_1d =
          [X, Y, VX, VY, Heading, Spin, Fuel, Throttle, LandedOn, Broken] +
-         SRB_time_left (this is just a single element, not an n-array)
+         SRB_time_left + time_acc (these are both single values)
         returns the derivative of y_1d, i.e.
-        [VX, VY, AX, AY, Spin, 0, Fuel consumption, 0, 0, 0] + -constant
+        [VX, VY, AX, AY, Spin, 0, Fuel consumption, 0, 0, 0] + -constant + 0
         (zeroed-out fields are changed elsewhere)
 
         !!!!!!!!!!! IMPORTANT !!!!!!!!!!!
@@ -424,7 +428,7 @@ class PEngine:
 
         return np.concatenate((
             y.VX, y.VY, Ax, Ay, y.Spin,
-            zeros, fuel_cons, zeros, zeros, zeros, np.array([srb_usage])
+            zeros, fuel_cons, zeros, zeros, zeros, np.array([srb_usage, 0])
         ), axis=None)
 
     def _run_simulation(self, t: float, y: state.PhysicsState) -> None:
@@ -448,7 +452,7 @@ class PEngine:
                 self._derive, pass_through_state=proto_state)
 
             events: List[Event] = [
-                HabFuelEvent(y), AltitudeEvent(y, self.R), LiftoffEvent(y),
+                AltitudeEvent(y, self.R), HabFuelEvent(y), LiftoffEvent(y),
                 SrbFuelEvent()
             ]
             if y.craft is not None:
@@ -460,8 +464,8 @@ class PEngine:
 
             ivp_out = scipy.integrate.solve_ivp(
                 derive_func,
-                # np.sqrt is here to give a slower-than-linear step size growth
-                [t, t + y.time_acc],
+                # math.pow is here to give a sub-linear step size growth.
+                [t, t + math.pow(y.time_acc, 1/1.2)],
                 # solve_ivp requires a 1D y0 array
                 y.y0(),
                 events=events,
@@ -509,6 +513,7 @@ class PEngine:
                         artificial = y[index]
                         if round(artificial.fuel) != 0:
                             continue
+                        log.info(f'{artificial.name} ran out of fuel.')
                         # This craft is out of fuel, the next iteration won't
                         # consume any fuel. Set throttle to zero anyway.
                         artificial.throttle = 0
@@ -516,7 +521,6 @@ class PEngine:
                         # the event function
                         artificial.fuel = 0
                         y[index] = artificial
-                        log.info(f'{artificial.name} ran out of fuel.')
                 if len(ivp_out.t_events[2]):
                     # A craft has a TWR > 1
                     craft = y.craft_entity()
