@@ -262,7 +262,7 @@ class PhysicsState:
         i = int(index)
         return self._entity_names[i] if i != self.NO_INDEX else ''
 
-    def _name_to_index(self, name: str) -> int:
+    def _name_to_index(self, name: Optional[str]) -> int:
         """Finds the index of the entity with the given name."""
         try:
             return self._entity_names.index(name) if name != '' \
@@ -306,13 +306,14 @@ class PhysicsState:
         for i in range(0, self._n):
             yield self.__getitem__(i)
 
-    def __getitem__(self, index: Union[str, int]) -> Entity:
+    def __getitem__(self, index: Union[str, int, None]) -> Entity:
         """Returns a Entity view at a given name or index.
 
         Allows the following:
         physics_entity = PhysicsState[2]
         physics_entity = PhysicsState[common.HABITAT]
         """
+        assert index is not None
         if isinstance(index, str):
             # Turn a name-based index into an integer
             index = self._entity_names.index(index)
@@ -329,7 +330,7 @@ class PhysicsState:
         entity.broken = bool(broken)
         return Entity(entity)
 
-    def __setitem__(self, index: Union[str, int], val: Entity):
+    def __setitem__(self, index: Union[str, int, None], val: Entity):
         """Puts a Entity at a given name or index in the state.
 
         Allows the following:
@@ -337,6 +338,7 @@ class PhysicsState:
         PhysicsState[common.HABITAT] = physics_entity
         """
         # TODO: allow y[common.HABITAT].fuel = 5
+        assert index is not None
         if isinstance(index, str):
             # Turn a name-based index into an integer
             index = self._entity_names.index(index)
@@ -446,12 +448,12 @@ class PhysicsState:
         return self[self.craft]
 
     @property
-    def craft(self) -> str:
+    def craft(self) -> Optional[str]:
         """Returns the currently-controlled craft.
         Not actually backed by any stored field, just a calculation."""
         if common.HABITAT not in self._entity_names and \
                 common.AYSE not in self._entity_names:
-            raise self.NoEntityError('No craft found')
+            return None
         if common.AYSE not in self._entity_names:
             return common.HABITAT
 

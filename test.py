@@ -249,7 +249,10 @@ class PhysicsEngineTestCase(unittest.TestCase):
         """Test that landed ships have stable altitude in the long term."""
         with PhysicsEngine('landed.json') as physics_engine:
             initial = physics_engine.get_state(10)
-            physics_engine.set_time_acceleration(1_000_000, requested_t=10)
+            physics_engine.handle_request(
+                network.Request(ident=network.Request.TIME_ACC_SET,
+                                time_acc_set=1_000_000),
+                requested_t=10)
             final = state.PhysicsState(
                 None, physics_engine.get_state(1_000_000))
             self.assertAlmostEqual(
