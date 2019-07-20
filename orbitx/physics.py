@@ -5,7 +5,7 @@ import math
 import threading
 import time
 import warnings
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, NamedTuple, Union
 
 import numpy as np
 import scipy.integrate
@@ -27,6 +27,12 @@ log = logging.getLogger()
 
 TIME_ACC_TO_BOUND = {time_acc.value: time_acc.accurate_bound
                      for time_acc in common.TIME_ACCS}
+
+
+class TimeAccChange(NamedTuple):
+    """Describes when the time acc of the simulation changes, and what to."""
+    time_acc: float
+    start_simtime: float
 
 
 class PEngine:
@@ -58,38 +64,56 @@ class PEngine:
         # self._last_simtime changes.
         self._solutions_cond = threading.Condition()
         self._solutions: collections.deque
-        self._last_monotime: float = time.monotonic()
+
         self._simthread: Optional[threading.Thread] = None
         self._simthread_exception: Optional[Exception] = None
         self._last_physical_state: state.protos.PhysicalState
+        self._last_monotime: float = time.monotonic()
+        self._last_simtime: float
+        self._time_acc_changes: collections.deque
 
         self.set_state(physical_state)
 
-    def _simtime(self, requested_t=None, *, peek_time=False):
-        """Gets simulation time, accounting for time acceleration and passage.
-
-        peek_time: if True, doesn't change any internal state. Use this as True
-                   for internal log messages, and False for external APIs.
-        """
+    def _simtime(self, requested_t=None):
+        """Gets simulation time, accounting for time acc and elapsed time."""
         # During runtime, strange things will happen if you mix calling
         # this with None (like from orbitx.py) or with values (like in test.py)
-
         if requested_t is None:
-            time_elapsed = max(
+            # "Alpha time" refers to time in the real world
+            # (just as the spacesim wiki defines it).
+            alpha_time_elapsed = max(
                 time.monotonic() - self._last_monotime,
                 0.0001
             )
-            if not peek_time:
-                self._last_monotime = time.monotonic()
-            requested_t = (
-                self._last_simtime +
-                time_elapsed * self._last_physical_state.time_acc
-            )
+            self._last_monotime = time.monotonic()
 
-        if not peek_time:
-            with self._solutions_cond:
-                self._last_simtime = requested_t
-                self._solutions_cond.notify_all()
+            simtime = self._last_simtime
+
+            assert self._time_acc_changes
+            if len(self._time_acc_changes) > 1:
+                # This while loop will increment simtime and decrement
+                # time_elapsed correspondingly until the second time acc change
+                # starts farther in the future than we will increment simtime.
+                while self._time_acc_changes[1].start_simtime < (
+                    simtime + self._time_acc_changes[0].time_acc *
+                        alpha_time_elapsed):
+                    remaining_simtime = \
+                        self._time_acc_changes[1].start_simtime - simtime
+                    simtime = self._time_acc_changes[1].start_simtime
+                    alpha_time_elapsed -= \
+                        remaining_simtime / self._time_acc_changes[0].time_acc
+                    # We've advanced past self._time_acc_changes[0],
+                    # we can forget it now.
+                    self._time_acc_changes.popleft()
+
+            # Now we will just advance partway into the span of time
+            # between self._time_acc_changes[0].startime and [1].startime.
+            simtime += alpha_time_elapsed * self._time_acc_changes[0].time_acc
+            requested_t = simtime
+
+        with self._solutions_cond:
+            self._last_simtime = requested_t
+            self._solutions_cond.notify_all()
 
         return requested_t
 
@@ -110,8 +134,16 @@ class PEngine:
         # self._solutions here, because we just stopped the background
         # simulation thread only a few lines ago.
         self._last_simtime = t0
+        # This double-ended queue should always have at least one element in
+        # it, and the first element should have a start_simtime less
+        # than self._last_simtime.
+        self._time_acc_changes = collections.deque(
+            [TimeAccChange(time_acc=y0.time_acc,
+             start_simtime=y0.timestamp)]
+        )
 
         # Essentially just a cache of ODE solutions.
+        # TODO: maybe initial value of this should be the last solutions?
         self._solutions = collections.deque(maxlen=SOLUTION_CACHE_SIZE)
 
         self._simthread = threading.Thread(
@@ -177,8 +209,9 @@ class PEngine:
         elif request.ident == Request.TIME_ACC_SET:
             assert request.time_acc_set >= 0
             y0.time_acc = request.time_acc_set
-            # TODO: We'll have to keep track of time_acc transitions for use by
-            # self._simtime().
+            self._time_acc_changes.append(
+                TimeAccChange(time_acc=y0.time_acc, start_simtime=y0.timestamp)
+            )
         elif request.ident == Request.ENGINEERING_UPDATE:
             # Multiply this value by 100, because OrbitV considers engines at
             # 100% to be 100x the maximum thrust.
@@ -315,7 +348,6 @@ class PEngine:
     def _simthread_target(self, t, y):
         while True:
             try:
-                print(f'starting sim with {y.time_acc}')
                 self._run_simulation(t, y)
                 if self._stopping_simthread:
                     return
@@ -532,7 +564,7 @@ class PEngine:
                     # SRB fuel exhaustion.
                     log.info('SRB exhausted.')
                     y.srb_time = common.SRB_EMPTY
-                if len(ivp_out.t_events[4]):
+                if len(ivp_out.t_events) > 5 and len(ivp_out.t_events[4]):
                     # The acceleration acting on the craft is high, might
                     # result in inaccurate results. SLOOWWWW DOWWWWNNNN.
                     slower_time_acc_index = list(
@@ -630,10 +662,10 @@ class LiftoffEvent(Event):
         """Return 0 when the craft is landed but thrusting enough to lift off,
         and a positive value otherwise."""
         y = state.PhysicsState(y_1d, self.initial_state._proto_state)
-        craft = y.craft_entity()
-        if craft is None:
+        if y.craft is None:
             # There is no craft, return early.
             return np.inf
+        craft = y.craft_entity()
 
         if not craft.landed():
             # We don't have to lift off because we already lifted off.
