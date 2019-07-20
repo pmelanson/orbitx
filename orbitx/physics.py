@@ -143,7 +143,6 @@ class PEngine:
         )
 
         # Essentially just a cache of ODE solutions.
-        # TODO: maybe initial value of this should be the last solutions?
         self._solutions = collections.deque(maxlen=SOLUTION_CACHE_SIZE)
 
         self._simthread = threading.Thread(
@@ -484,12 +483,12 @@ class PEngine:
                 self._derive, pass_through_state=proto_state)
 
             events: List[Event] = [
-                AltitudeEvent(y, self.R), HabFuelEvent(y), LiftoffEvent(y),
+                CollisionEvent(y, self.R), HabFuelEvent(y), LiftoffEvent(y),
                 SrbFuelEvent()
             ]
             if y.craft is not None:
                 craft_index = y._name_to_index(y.craft)
-                events.append(CraftAcc(derive_func,
+                events.append(CraftAccEvent(derive_func,
                                        2 * len(y) + craft_index,
                                        3 * len(y) + craft_index,
                                        TIME_ACC_TO_BOUND[round(y.time_acc)]))
@@ -533,52 +532,60 @@ class PEngine:
 
             if ivp_out.status > 0:
                 log.info(f'Got event: {ivp_out.t_events} at t={t}.')
-                if len(ivp_out.t_events[0]):
-                    # Collision, simulation ended. Handled it and continue.
-                    assert len(ivp_out.t_events[0]) == 1
-                    assert len(ivp_out.t) >= 2
-                    y = _collision_decision(t, y, events[0])
-                    y = _reconcile_entity_dynamics(y)
-                if len(ivp_out.t_events[1]):
-                    # Something ran out of fuel.
-                    for index in self._artificials:
-                        artificial = y[index]
-                        if round(artificial.fuel) != 0:
-                            continue
-                        log.info(f'{artificial.name} ran out of fuel.')
-                        # This craft is out of fuel, the next iteration won't
-                        # consume any fuel. Set throttle to zero anyway.
-                        artificial.throttle = 0
-                        # Set fuel to a negative value, so it doesn't trigger
-                        # the event function
-                        artificial.fuel = 0
-                        y[index] = artificial
-                if len(ivp_out.t_events[2]):
-                    # A craft has a TWR > 1
-                    craft = y.craft_entity()
-                    log.info('We have liftoff of the '
-                             f'{craft.name} from {craft.landed_on} at {t}.')
-                    craft.landed_on = ''
-                    y[y.craft] = craft
-                if len(ivp_out.t_events[3]):
-                    # SRB fuel exhaustion.
-                    log.info('SRB exhausted.')
-                    y.srb_time = common.SRB_EMPTY
-                if len(ivp_out.t_events) > 5 and len(ivp_out.t_events[4]):
-                    # The acceleration acting on the craft is high, might
-                    # result in inaccurate results. SLOOWWWW DOWWWWNNNN.
-                    slower_time_acc_index = list(
-                        TIME_ACC_TO_BOUND.keys()
-                    ).index(round(y.time_acc)) - 1
-                    assert slower_time_acc_index >= 0
-                    slower_time_acc = common.TIME_ACCS[slower_time_acc_index]
-                    # We never want to automatically pause the simulation.
-                    if slower_time_acc.value != 0:
-                        log.info(f'{y.time_acc} is too fast, '
-                                 f'slowing down to {slower_time_acc.value}')
-                        # We can lower the time acc.
-                        y.time_acc = slower_time_acc.value
-                        raise PEngine.RestartSimulationException(t, y)
+                for index, event_t in enumerate(ivp_out.t_events):
+                    if len(event_t) == 0:
+                        # If this event didn't occur, then event_t == []
+                        continue
+                    event = events[index]
+                    if isinstance(event, CollisionEvent):
+                        # Collision, simulation ended. Handled it and continue.
+                        assert len(ivp_out.t_events[0]) == 1
+                        assert len(ivp_out.t) >= 2
+                        y = _collision_decision(t, y, events[0])
+                        y = _reconcile_entity_dynamics(y)
+                    if isinstance(event, HabFuelEvent):
+                        # Something ran out of fuel.
+                        for index in self._artificials:
+                            artificial = y[index]
+                            if round(artificial.fuel) != 0:
+                                continue
+                            log.info(f'{artificial.name} ran out of fuel.')
+                            # This craft is out of fuel, the next iteration
+                            # won't consume any fuel. Set throttle to zero.
+                            artificial.throttle = 0
+                            # Set fuel to a negative value, so it doesn't
+                            # trigger the event function.
+                            artificial.fuel = 0
+                            y[index] = artificial
+                    if isinstance(event, LiftoffEvent):
+                        # A craft has a TWR > 1
+                        craft = y.craft_entity()
+                        log.info(
+                            'We have liftoff of the '
+                            f'{craft.name} from {craft.landed_on} at {t}.')
+                        craft.landed_on = ''
+                        y[y.craft] = craft
+                    if isinstance(event, SrbFuelEvent):
+                        # SRB fuel exhaustion.
+                        log.info('SRB exhausted.')
+                        y.srb_time = common.SRB_EMPTY
+                    if isinstance(event, CraftAccEvent):
+                        # The acceleration acting on the craft is high, might
+                        # result in inaccurate results. SLOOWWWW DOWWWWNNNN.
+                        slower_time_acc_index = list(
+                            TIME_ACC_TO_BOUND.keys()
+                        ).index(round(y.time_acc)) - 1
+                        assert slower_time_acc_index >= 0
+                        slower_time_acc = \
+                            common.TIME_ACCS[slower_time_acc_index]
+                        # We never want to automatically pause the simulation.
+                        if slower_time_acc.value != 0:
+                            log.info(
+                                f'{y.time_acc} is too fast, '
+                                f'slowing down to {slower_time_acc.value}')
+                            # We should lower the time acc.
+                            y.time_acc = slower_time_acc.value
+                            raise PEngine.RestartSimulationException(t, y)
 
 
 class Event:
@@ -596,7 +603,7 @@ class SrbFuelEvent(Event):
     def __call__(self, t, y_1d) -> float:
         """Returns how much SRB burn time is left.
         This will cause simulation to stop when SRB burn time reaches 0."""
-        return y_1d[-1]
+        return y_1d[state.PhysicsState.SRB_TIME_INDEX]
 
 
 class HabFuelEvent(Event):
@@ -612,7 +619,7 @@ class HabFuelEvent(Event):
         return np.inf
 
 
-class AltitudeEvent(Event):
+class CollisionEvent(Event):
     def __init__(self, initial_state: state.PhysicsState, radii: np.ndarray):
         self.initial_state = initial_state
         self.radii = radii
@@ -690,7 +697,7 @@ class LiftoffEvent(Event):
         return max(0, common.LAUNCH_TWR - thrust / weight)
 
 
-class CraftAcc(Event):
+class CraftAccEvent(Event):
     def __init__(self, derive: Callable[[float, np.ndarray], np.ndarray],
                  ax_index: int, ay_index: int, acc_bound: float):
         self.derive = derive
