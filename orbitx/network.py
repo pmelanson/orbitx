@@ -1,9 +1,9 @@
 """Network-related classes."""
 
 import logging
+import queue
 import threading
 import time
-import queue
 from types import SimpleNamespace
 from typing import Dict, List, Optional, Iterable
 
@@ -14,7 +14,6 @@ from orbitx import orbitx_pb2_grpc as grpc_stubs
 from orbitx.data_structures import PhysicsState
 
 log = logging.getLogger()
-
 
 DEFAULT_PORT = 28430
 
@@ -66,7 +65,7 @@ class StateServer(grpc_stubs.StateServerServicer):
             self._class_used_properly = True
 
     def get_physical_state(
-        self, request_iterator: Iterable[protos.Command], context) \
+            self, request_iterator: Iterable[protos.Command], context) \
             -> protos.PhysicalState:
         """Server-side implementation of this remote procedure call (RPC).
 

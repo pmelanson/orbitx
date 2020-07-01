@@ -16,17 +16,17 @@ import numpy as np
 import vpython
 
 from orbitx import common
-from orbitx.physics import calc
 from orbitx.data_structures import Entity, Navmode, PhysicsState
-from orbitx.network import Request
-from orbitx.graphics.threedeeobj import ThreeDeeObj
-from orbitx.graphics.planet import Planet
-from orbitx.graphics.habitat import Habitat
-from orbitx.graphics.science_mod import ScienceModule
 from orbitx.graphics.ayse import AYSE
-from orbitx.graphics.star import Star
-from orbitx.graphics.vpython_widgets import Checkbox, Menu, TableText
+from orbitx.graphics.habitat import Habitat
 from orbitx.graphics.orbit_projection import OrbitProjection
+from orbitx.graphics.planet import Planet
+from orbitx.graphics.science_mod import ScienceModule
+from orbitx.graphics.star import Star
+from orbitx.graphics.threedeeobj import ThreeDeeObj
+from orbitx.graphics.vpython_widgets import Checkbox, Menu, TableText
+from orbitx.network import Request
+from orbitx.physics import calc
 
 log = logging.getLogger()
 
@@ -47,11 +47,11 @@ class MiscCommand(Enum):
 class FlightGui:
 
     def __init__(
-        self,
-        draw_state: PhysicsState,
-        *,
-        title: str,
-        running_as_mirror: bool
+            self,
+            draw_state: PhysicsState,
+            *,
+            title: str,
+            running_as_mirror: bool
     ) -> None:
         assert len(draw_state) >= 1
 
@@ -96,6 +96,7 @@ class FlightGui:
             vpython.rate(100)
             self._scene.range = self._scene.range * 0.92
         self.recentre_camera(common.DEFAULT_CENTRE)
+
     # end of __init__
 
     @staticmethod
@@ -238,6 +239,7 @@ class FlightGui:
             # Pause
             self._sidebar.time_acc_menu._menu.index = 0
             self._time_acc_dropdown_hook(self._sidebar.time_acc_menu._menu)
+
     # end of _handle_keydown
 
     def draw(self, draw_state: PhysicsState) -> None:
@@ -425,6 +427,8 @@ class FlightGui:
             # We're not even running in mirror mode you absolute cheese
             return False
         return self._sidebar.follow_lead_checkbox._checkbox.checked
+
+
 # end of class FlightGui
 
 
@@ -485,7 +489,7 @@ class Sidebar:
         """Enable or disable all inputs, except for networking checkbox."""
         for menu in [
             self.centre_menu, self.reference_menu, self.target_menu,
-                self.navmode_menu, self.time_acc_menu, self.misc_menu]:
+            self.navmode_menu, self.time_acc_menu, self.misc_menu]:
             menu._menu.disabled = disabled
         for checkbox in [self.trails_checkbox, self.orbits_checkbox]:
             checkbox._checkbox.disabled = disabled
@@ -533,7 +537,7 @@ class Sidebar:
                 state.craft_entity(),
                 state.reference_entity(),
                 state.target_entity()), "°") or
-            "Same ref and targ",
+                          "Same ref and targ",
             "Angle between Habitat, Reference, and Target",
             new_section=False))
 
@@ -573,6 +577,7 @@ class Sidebar:
                 return f"{deg_spin} °/s ccw"
             else:
                 return f"{deg_spin} °/s"
+
         self._wtexts.append(TableText(
             "Rotation",
             rotation_formatter,
@@ -640,11 +645,12 @@ class Sidebar:
             lambda state: common.format_num(calc.landing_acceleration(
                 state.craft_entity(),
                 state.target_entity()), " m/s/s") or
-            "no vertical landing",
+                          "no vertical landing",
             "Constant engine acc to land during vertical descent to target",
             new_section=False))
 
         vpython.canvas.get_selected().caption += "</table>"
+
     # end of _create_wtexts
 
     def _create_menus(self):
@@ -706,6 +712,7 @@ class Sidebar:
             caption="Command",
             helptext="Several miscellaneous commands"
         )
+
     # end of _create_menus
 
     def update(self, draw_state: PhysicsState):

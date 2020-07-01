@@ -3,7 +3,7 @@
      thing to split out the CSS and JS code in this file to separate files, and
      then include them. It's simpler, unfortunately, to keep everything in
      one file, like so. -->
-<input type="checkbox" id="helptext_checkbox" onClick="show_hide_help()"> Help text
+<input id="helptext_checkbox" onClick="show_hide_help()" type="checkbox"> Help text
 
 <table class="helptext">
     <caption>Input Cheatsheet</caption>
@@ -69,12 +69,14 @@ function show_hide_help() {
 for (var inp of document.querySelectorAll("input,select")) {
     inp.onchange = function(){this.blur()};
 }
+
 </script>
 
 <style title="disable_helptext">
 .helptext {
     display: none;
 }
+
 </style>
 
 <style>
@@ -146,6 +148,7 @@ span {
 .code {
     font-family: monospace;
 }
+
 </style>
 
 <script>
@@ -159,4 +162,5 @@ function remove_saveload_hint() {
     text_inputs[0].placeholder = 'Save...';
     text_inputs[1].placeholder = 'Load...';
 }
+
 </script>

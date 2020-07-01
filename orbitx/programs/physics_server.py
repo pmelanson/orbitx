@@ -1,21 +1,20 @@
 import argparse
-import concurrent.futures
 import atexit
+import concurrent.futures
 import logging
 import os
 from pathlib import Path
 
 import grpc
+import orbitx.orbitx_pb2_grpc as grpc_stubs
 
 from orbitx import common
 from orbitx import network
 from orbitx import physics
 from orbitx import programs
 from orbitx.graphics.server_gui import ServerGui
-import orbitx.orbitx_pb2_grpc as grpc_stubs
 
 log = logging.getLogger()
-
 
 name = "Physics Server"
 

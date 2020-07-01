@@ -2,10 +2,10 @@ from typing import Optional
 
 import vpython
 
-from orbitx.physics import calc
 from orbitx import common
 from orbitx.data_structures import Entity
 from orbitx.graphics.threedeeobj import ThreeDeeObj
+from orbitx.physics import calc
 
 
 class AYSE(ThreeDeeObj):
@@ -53,7 +53,7 @@ class AYSE(ThreeDeeObj):
 
     def _label_text(self, entity: Entity) -> str:
         return (
-            f'{entity.name}\n'
-            f'Fuel: {common.format_num(entity.fuel, " kg")}' +
-            ('\nLanded' if entity.landed() else '')
+                f'{entity.name}\n'
+                f'Fuel: {common.format_num(entity.fuel, " kg")}' +
+                ('\nLanded' if entity.landed() else '')
         )
